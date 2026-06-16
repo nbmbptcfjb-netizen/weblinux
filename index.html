@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>WebLinux — RISC-V 64-bit Linux in Browser</title>
+  <link href="style.css" type="text/css" rel="stylesheet"/>
+</head>
+<body>
+<div id="app-wrapper">
+<div id="main-container">
+<div id="term_wrap">
+  <div id="term_container">
+  </div>
+  <div id="mobile-input-wrap">
+    <span class="mobile-prompt">$</span>
+    <input type="text" id="mobile-input" placeholder="Enter command..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">
+  </div>
+  <div>
+    <textarea id="term_paste" cols="10" rows="1" autocorrect="off">Paste Here</textarea>
+    <label>
+      <img title="Upload files" src="images/upload-icon.png"><input type="file" id="files" multiple onchange="on_update_files(this.files)">
+    </label>
+    <progress id="net_progress">
+    </progress>
+  </div>
+</div>
+
+<div id="info-panel">
+  <div class="panel-title">SYSTEM INFO</div>
+  <div class="info-item">
+    <span class="info-label">Architecture</span>
+    <span class="info-value">RISC-V 64-bit (RV64IMAFDC)</span>
+  </div>
+  <div class="info-item">
+    <span class="info-label">Kernel</span>
+    <span class="info-value">Linux 4.15.0</span>
+  </div>
+  <div class="info-item">
+    <span class="info-label">BootLoader</span>
+    <span class="info-value">BBL (Berkeley Boot Loader)</span>
+  </div>
+  <div class="info-item">
+    <span class="info-label">RAM</span>
+    <span class="info-value">128 MB</span>
+  </div>
+  <div class="info-item">
+    <span class="info-label">Emulator</span>
+    <span class="info-value">TinyEMU → WASM</span>
+  </div>
+  <div class="info-item">
+    <span class="info-label">RootFS</span>
+    <span class="info-value">Buildroot + BusyBox</span>
+  </div>
+</div>
+
+</div><!-- #main-container -->
+</div><!-- #app-wrapper -->
+
+<script type="text/javascript">
+// Runs BEFORE term.js.  When the input is focused, blocks term.js from
+// consuming keypress / Backspace / Delete so the input works like a
+// normal text field.  Only Enter triggers a VM send.
+(function() {
+  var input = document.getElementById('mobile-input');
+  if (!input) return;
+
+  // Block term.js from eating printable characters (keypress)
+  document.addEventListener('keypress', function(ev) {
+    if (document.activeElement !== input) return;
+    ev.stopImmediatePropagation();        // term.js skipped
+    // do NOT preventDefault — browser inserts the char into the input
+  }, true);
+
+  // Block term.js from eating Backspace / Delete / Enter; handle Enter
+  document.addEventListener('keydown', function(ev) {
+    if (document.activeElement !== input) return;
+
+    if (ev.keyCode === 13) {
+      // Enter — flush input value to VM
+      ev.stopImmediatePropagation();
+      ev.preventDefault();
+      var cmd = input.value;
+      input.value = '';
+      if (!cmd.trim()) return;
+      if (typeof console_write1 === 'function') {
+        for (var i = 0; i < cmd.length; i++) console_write1(cmd.charCodeAt(i));
+        console_write1(13);
+      }
+      return;
+    }
+
+    if (ev.keyCode === 8 || ev.keyCode === 46) {
+      // Backspace / Delete — block term.js, browser handles via beforeinput
+      ev.stopImmediatePropagation();
+      // do NOT preventDefault — browser deletes the char
+      return;
+    }
+  }, true);
+})();
+</script>
+<script type="text/javascript" src="term.js"></script>
+<script type="text/javascript" src="jslinux.js"></script>
+<div id="copyright">&copy; 2017-2019 Fabrice Bellard — WebLinux Project 2026</div>
+</body>
+</html>
