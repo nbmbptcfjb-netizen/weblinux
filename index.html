@@ -55,6 +55,39 @@
     <span class="info-label">RootFS</span>
     <span class="info-value">Buildroot + BusyBox</span>
   </div>
+  <div id="bg-btn-wrap">
+    <input type="file" id="bg-file-input" accept="image/*" style="display:none">
+    <button id="bg-btn" title="设置网页背景图片">🖼 背景</button>
+  </div>
+  <script>
+  (function() {
+    var bgInput = document.getElementById('bg-file-input');
+    var bgBtn   = document.getElementById('bg-btn');
+    bgBtn.addEventListener('click', function() { bgInput.click(); });
+    bgInput.addEventListener('change', function() {
+      var f = this.files[0];
+      if (!f) return;
+      var reader = new FileReader();
+      reader.onload = function(ev) {
+        document.body.style.backgroundImage = 'url(' + reader.result + ')';
+        document.body.style.backgroundSize = 'cover';
+        document.body.style.backgroundPosition = 'center';
+        document.body.style.backgroundAttachment = 'fixed';
+        document.body.style.backgroundRepeat = 'no-repeat';
+        /* 终端和面板半透明，保证文字可读 */
+        var t = document.querySelector('.term');
+        if (t) t.style.background = 'rgba(0,0,0,0.85)';
+        var p = document.getElementById('info-panel');
+        if (p) p.style.background = 'rgba(10,10,10,0.85)';
+        var w = document.getElementById('mobile-input-wrap');
+        if (w) w.style.background = 'rgba(13,13,13,0.85)';
+        var inp = document.getElementById('mobile-input');
+        if (inp) inp.style.background = 'rgba(17,17,17,0.75)';
+      };
+      reader.readAsDataURL(f);
+    });
+  })();
+  </script>
 </div>
 
 </div><!-- #main-container -->

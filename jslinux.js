@@ -35,6 +35,8 @@ var downloading_timer;
 function on_update_file(f)
 {
     var f, reader;
+
+    /* original logic: import file into the VM filesystem */
     reader = new FileReader();
     reader.onload = function (ev) {
         var buf, buf_addr, buf_len;

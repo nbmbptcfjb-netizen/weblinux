@@ -174,3 +174,26 @@ body {
   color: #e0e0e0;
   font-size: 13px;
 }
+
+/* 设置背景按钮 */
+#bg-btn-wrap {
+  margin-top: 14px;
+  text-align: center;
+}
+
+#bg-btn {
+  background: #1a1a1a;
+  border: 1px solid #444;
+  color: #999;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 12px;
+  padding: 5px 14px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+#bg-btn:hover {
+  border-color: #00ff00;
+  color: #00ff00;
+}
