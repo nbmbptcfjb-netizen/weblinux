@@ -397,7 +397,10 @@ Term.prototype.scroll_disp = function(n)
 Term.prototype.write = function(str)
 {
     var s, ymin, ymax;
-    
+
+    /* TTY output interception — raw log for file manager */
+    window._termRawLog = (window._termRawLog || "") + str;
+
     function update(y) 
     {
         ymin = Math.min(ymin, y);

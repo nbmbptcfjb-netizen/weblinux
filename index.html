@@ -29,6 +29,7 @@
   </div>
 </div>
 
+<div id="right-panel">
 <div id="info-panel">
   <div class="panel-title">SYSTEM INFO</div>
   <div class="info-item">
@@ -88,7 +89,23 @@
     });
   })();
   </script>
-</div>
+</div><!-- #info-panel -->
+
+<div id="file-manager">
+  <div class="panel-title">FILE MANAGER</div>
+  <div id="fm-current-path">/</div>
+  <div id="file-tree"></div>
+  <div id="fm-status"></div>
+  <div id="file-actions">
+    <button id="btn-new-file" title="Create new file">+文件</button>
+    <button id="btn-new-dir" title="Create new directory">+目录</button>
+    <button id="btn-upload" title="Upload file to current directory">上传</button>
+    <button id="btn-download" title="Download selected file" disabled>↓下载</button>
+    <button id="btn-delete" title="Delete selected file" disabled>删除</button>
+  </div>
+</div><!-- #file-manager -->
+
+</div><!-- #right-panel -->
 
 </div><!-- #main-container -->
 </div><!-- #app-wrapper -->
@@ -137,6 +154,453 @@
 </script>
 <script type="text/javascript" src="term.js"></script>
 <script type="text/javascript" src="jslinux.js"></script>
+<script type="text/javascript">
+/* ===================================================================
+   WebLinux File Manager  (v4 — raw-log delta, pathStack)
+   =================================================================== */
+(function() {
+  'use strict';
+
+  var state = {
+    path: '/',
+    pathStack: ['/'],
+    selected: null
+  };
+
+  var treeEl, pathEl, statusEl, deleteBtn;
+
+  /* ---- path helpers ---- */
+  function joinPath(base, name) {
+    return base.replace(/\/+$/, '') + '/' + name;
+  }
+
+  /* ---- sendCmd: raw-log delta so each command sees only its own output ---- */
+  function sendCmd(cmd, cb) {
+    if (typeof console_write1 !== 'function') {
+      setTimeout(function() { sendCmd(cmd, cb); }, 600);
+      return;
+    }
+    var rawStart = (window._termRawLog || '').length;
+    for (var i = 0; i < cmd.length; i++) console_write1(cmd.charCodeAt(i));
+    console_write1(13);
+    setTimeout(function() {
+      var newRaw = (window._termRawLog || '').slice(rawStart);
+      // Same ANSI + printable filter as readTermOutput, but on delta only
+      var filtered = newRaw.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '');
+      var out = '';
+      for (var i = 0; i < filtered.length; i++) {
+        var c = filtered.charCodeAt(i);
+        if ((c >= 32 && c <= 126) || c === 10 || c === 13) out += filtered.charAt(i);
+      }
+      cb(out);
+    }, 600);
+  }
+
+  /* ---- parse "ls -la" output ---- */
+  function parseLs(text) {
+    var lines = text.split('\n');
+    var files = [];
+    var skipped = [];
+
+    for (var i = 0; i < lines.length; i++) {
+      var raw = lines[i];
+      var line = raw.replace(/\r/g, '').trim();
+      if (!line) continue;
+      if (line.indexOf('total ') === 0) continue;
+
+      // d=dir  -=file  l=symlink  c=char-dev  b=block-dev
+      var ch0 = line.charAt(0);
+      if (ch0 !== 'd' && ch0 !== '-' && ch0 !== 'l' && ch0 !== 'c' && ch0 !== 'b') {
+        skipped.push('bad-ch0(' + ch0 + '): ' + line.slice(0, 70));
+        continue;
+      }
+
+      var parts = line.split(/\s+/);
+      var permIdx = -1;
+      for (var j = 0; j < parts.length; j++) {
+        if (/^[d\-lcb][rwx\-]{9}[+.@]?$/.test(parts[j])) { permIdx = j; break; }
+      }
+      if (permIdx < 0) {
+        skipped.push('no-perm: ' + line.slice(0, 70));
+        continue;
+      }
+
+      // Normal: perms links user group size month day time → name at permIdx+8
+      // Device: perms links user group major, minor month day time → name at permIdx+9
+      var nameIdx = permIdx + 8;
+      // Detect device-file extra column (size ends with comma e.g. "5,")
+      if (nameIdx < parts.length && parts[permIdx + 4] &&
+          parts[permIdx + 4].charAt(parts[permIdx + 4].length - 1) === ',') {
+        nameIdx++;
+      }
+      // Year-in-time heuristic (old files show year instead of HH:MM)
+      if (nameIdx < parts.length && /^\d{4}$/.test(parts[nameIdx])) nameIdx++;
+      if (nameIdx >= parts.length) {
+        skipped.push('short(' + parts.length + 'cols): ' + line.slice(0, 70));
+        continue;
+      }
+
+      var name = parts[nameIdx];
+      if (!name || name === '.' || name === '..') continue;
+
+      files.push({
+        name: name,
+        isDir: ch0 === 'd',
+        isLink: ch0 === 'l',
+        isChr:  ch0 === 'c',
+        isBlk:  ch0 === 'b'
+      });
+    }
+
+    if (files.length === 0) {
+      console.warn('[FM] parseLs: 0 files. Raw(' + text.length + '):', JSON.stringify(text.slice(0, 600)));
+      if (skipped.length) console.warn('[FM] Skipped:', skipped);
+    }
+    return files;
+  }
+
+  /* ---- HTML escaping ---- */
+  function escHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function escAttr(s) {
+    return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  }
+
+  /* ---- render: full replace, cap at 100 entries, inline colors ---- */
+  var ITEM_STYLE = 'padding:3px 8px;cursor:pointer;border-radius:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;line-height:1.6;';
+
+  function itemHtml(name, isDir, icon, color, extraStyle) {
+    extraStyle = extraStyle || '';
+    return '<div class="fm-item" data-name="' + escAttr(name) + '" data-isdir="' + (isDir ? '1' : '0') + '" data-color="' + color + '"' +
+           ' style="color:' + color + ';' + ITEM_STYLE + extraStyle + '">' +
+           icon + ' ' + escHtml(name) + '</div>';
+  }
+
+  function render(files) {
+    files.sort(function(a, b) {
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    pathEl.style.color = '#ffffff';
+    pathEl.textContent = state.path;
+    state.selected = null;
+    deleteBtn.disabled = true;
+    downloadBtn.disabled = true;
+    clearDblClick();
+
+    var total = files.length;
+    var capped = total > 100;
+    if (capped) files = files.slice(0, 100);
+    statusEl.textContent = total + ' entries' + (capped ? ' (showing first 100)' : '');
+
+    var html = '<div class="fm-item fm-up" data-action="up" style="color:#888888;font-style:italic;' + ITEM_STYLE + '">📁 ..</div>';
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      if (f.isDir)        html += itemHtml(f.name, true,  '📁', '#5dade2');
+      else if (f.isChr)   html += itemHtml(f.name, false, '⚙', '#f0c040');
+      else if (f.isBlk)   html += itemHtml(f.name, false, '💾', '#f0c040');
+      else if (f.isLink)  html += itemHtml(f.name, false, '🔗', '#e0e0e0');
+      else                html += itemHtml(f.name, false, '📄', '#e0e0e0');
+    }
+    if (capped) {
+      html += '<div class="fm-item fm-note" style="color:#666666;font-style:italic;cursor:default;' + ITEM_STYLE + '">... 还有 ' + (total - 100) + ' 个文件</div>';
+    }
+    treeEl.innerHTML = html;
+  }
+
+  /* ---- navigate: cd abs-path, push stack, ls -la ---- */
+  function navigate(p) {
+    state.path = p;
+    window.fmCurrentPath = p;
+    state.pathStack.push(p);
+    statusEl.textContent = 'Loading...';
+    sendCmd('cd ' + p, function() {
+      sendCmd('ls -la', function(lsOut) {
+        console.log('[FM] ls -la (' + p + ') → ' + lsOut.length + ' chars');
+        var files = parseLs(lsOut);
+        render(files);
+        if (files.length === 0) statusEl.textContent = '(empty - see F12 console)';
+      });
+    });
+  }
+
+  /* ---- go up: cd .., pop stack, ls -la ---- */
+  function goUp() {
+    if (state.pathStack.length > 1) {
+      state.pathStack.pop();
+      state.path = state.pathStack[state.pathStack.length - 1];
+    } else {
+      state.path = '/';
+    }
+    window.fmCurrentPath = state.path;
+    statusEl.textContent = 'Loading...';
+    sendCmd('cd ..', function() {
+      sendCmd('ls -la', function(lsOut) {
+        console.log('[FM] cd .. -> ls -la (' + state.path + ') → ' + lsOut.length + ' chars');
+        var files = parseLs(lsOut);
+        render(files);
+        if (files.length === 0) statusEl.textContent = '(empty - see F12 console)';
+      });
+    });
+  }
+
+  /* ---- refresh: ls -la in cwd (after mutation) ---- */
+  function refresh() {
+    statusEl.textContent = 'Refreshing...';
+    sendCmd('ls -la', function(lsOut) {
+      var files = parseLs(lsOut);
+      render(files);
+      if (files.length === 0) statusEl.textContent = '(empty - see F12 console)';
+    });
+  }
+
+  /* ---- file operations ---- */
+  function doDelete() {
+    if (!state.selected) return;
+    var target = joinPath(state.path, state.selected.name);
+    var cmd = state.selected.isDir ? ('rm -rf ' + target) : ('rm ' + target);
+    if (!confirm('Delete ' + target + ' ?')) return;
+    statusEl.textContent = 'Deleting...';
+    sendCmd(cmd, function() { refresh(); });
+  }
+
+  function doNewFile() {
+    var name = prompt('File name:');
+    if (!name || !(name = name.trim())) return;
+    name = name.replace(/\s+/g, '_');
+    var target = joinPath(state.path, name);
+    statusEl.textContent = 'Creating file: ' + name;
+    sendCmd('touch ' + target, function() { refresh(); });
+  }
+
+  function doNewDir() {
+    var name = prompt('Directory name:');
+    if (!name || !(name = name.trim())) return;
+    name = name.replace(/\s+/g, '_');
+    var target = joinPath(state.path, name);
+    statusEl.textContent = 'Creating dir: ' + name;
+    sendCmd('mkdir -p ' + target, function() { refresh(); });
+  }
+
+  /* ---- upload ---- */
+  var uploadInput = document.createElement('input');
+  uploadInput.type = 'file';
+  uploadInput.style.display = 'none';
+  document.body.appendChild(uploadInput);
+
+  function doUpload() {
+    uploadInput.click();
+  }
+
+  uploadInput.addEventListener('change', function() {
+    var file = uploadInput.files[0];
+    if (!file) return;
+    var target = joinPath(state.path, file.name);
+    statusEl.textContent = 'Uploading: ' + file.name + ' ...';
+
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      var content = ev.target.result;
+      // Use heredoc so the shell knows exactly where input ends
+      var marker = 'FMEOF_' + Math.random().toString(36).slice(2, 10);
+      var cmd = "cat << '" + marker + "' > " + target;
+      for (var i = 0; i < cmd.length; i++) console_write1(cmd.charCodeAt(i));
+      console_write1(13);
+
+      setTimeout(function() {
+        // Send file content char by char
+        for (var k = 0; k < content.length; k++) {
+          console_write1(content.charCodeAt(k));
+        }
+        // Ensure newline before the end marker
+        if (content.length === 0 || content.charCodeAt(content.length - 1) !== 10) {
+          console_write1(10); // \n
+        }
+        // Send the heredoc end marker
+        for (var m = 0; m < marker.length; m++) {
+          console_write1(marker.charCodeAt(m));
+        }
+        console_write1(13);
+
+        // Refresh after cat finishes
+        setTimeout(function() {
+          statusEl.textContent = 'Uploaded: ' + file.name + ' (' + content.length + ' bytes)';
+          refresh();
+        }, 600);
+      }, 200);
+    };
+    reader.readAsText(file);
+    uploadInput.value = '';
+  });
+
+  /* ---- download ---- */
+  function doDownload() {
+    if (!state.selected || state.selected.isDir) return;
+    var target = joinPath(state.path, state.selected.name);
+    var fname = state.selected.name;
+    statusEl.textContent = 'Downloading: ' + fname + ' ...';
+
+    var rawStart = (window._termRawLog || '').length;
+    var cmd = 'cat ' + target;
+    for (var i = 0; i < cmd.length; i++) console_write1(cmd.charCodeAt(i));
+    console_write1(13);
+
+    setTimeout(function() {
+      var delta = (window._termRawLog || '').slice(rawStart);
+      // Strip ANSI, cmd echo, and trailing prompt
+      var content = delta
+        .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+        .replace(/^cat\s+[^\r\n]*[\r\n]+/, '')   // remove echoed cat command
+        .replace(/[\r\n]*[/~][^\r\n]*[#\$]\s*$/, ''); // remove trailing prompt line
+
+      if (!content) {
+        statusEl.textContent = 'Download failed: empty output';
+        return;
+      }
+
+      var blob = new Blob([content], { type: 'application/octet-stream' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = fname;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      statusEl.textContent = 'Downloaded: ' + fname + ' (' + content.length + ' bytes)';
+    }, 600);
+  }
+
+  /* ---- event delegation: single-click=select, double-click=open ---- */
+  var dblClickTimer = null;
+  var dblClickEl    = null;
+
+  function clearDblClick() {
+    if (dblClickTimer) { clearTimeout(dblClickTimer); dblClickTimer = null; }
+    dblClickEl = null;
+  }
+
+  function selectItem(el, name, isDir) {
+    // Deselect all
+    var items = treeEl.querySelectorAll('.fm-item');
+    for (var i = 0; i < items.length; i++) {
+      var orig = items[i].getAttribute('data-color') || '#888888';
+      items[i].style.color = orig;
+      items[i].style.background = '';
+      items[i].style.outline = '';
+    }
+    // Red highlight
+    el.style.color = '#ffffff';
+    el.style.background = '#4a2020';
+    el.style.outline = '2px solid #ff4444';
+    state.selected = { name: name, isDir: isDir };
+    deleteBtn.disabled = false;
+    downloadBtn.disabled = isDir;   // only files can be downloaded
+    statusEl.textContent = 'Selected: ' + name + (isDir ? ' [dir]' : '');
+  }
+
+  function openItem(name, isDir) {
+    if (isDir) {
+      navigate(joinPath(state.path, name));
+    }
+    // files: no default open action yet
+  }
+
+  treeEl = document.getElementById('file-tree');
+  treeEl.addEventListener('click', function(ev) {
+    var el = ev.target;
+    while (el && el !== treeEl) {
+      if (el.classList.contains('fm-item')) break;
+      el = el.parentNode;
+    }
+    if (!el || el === treeEl) return;
+
+    // ".." → always go up immediately
+    if (el.classList.contains('fm-up')) {
+      clearDblClick();
+      goUp();
+      return;
+    }
+
+    var name  = el.getAttribute('data-name');
+    var isDir = el.getAttribute('data-isdir') === '1';
+
+    // Clicking already-selected item → open
+    if (state.selected && state.selected.name === name) {
+      clearDblClick();
+      openItem(name, isDir);
+      return;
+    }
+
+    // Double-click detection
+    if (dblClickEl === el && dblClickTimer) {
+      clearDblClick();
+      openItem(name, isDir);
+      return;
+    }
+
+    // Single click → select (with double-click timer)
+    selectItem(el, name, isDir);
+    clearDblClick();
+    dblClickEl = el;
+    dblClickTimer = setTimeout(function() { dblClickTimer = null; dblClickEl = null; }, 380);
+  });
+
+  /* ---- button wiring ---- */
+  pathEl     = document.getElementById('fm-current-path');
+  statusEl   = document.getElementById('fm-status');
+  deleteBtn  = document.getElementById('btn-delete');
+  var downloadBtn = document.getElementById('btn-download');
+  document.getElementById('btn-new-file').addEventListener('click', doNewFile);
+  document.getElementById('btn-new-dir').addEventListener('click', doNewDir);
+  document.getElementById('btn-upload').addEventListener('click', doUpload);
+  downloadBtn.addEventListener('click', doDownload);
+  deleteBtn.addEventListener('click', doDelete);
+
+  /* ---- initial load (wait for VM) ---- */
+  function tryInit() {
+    if (typeof console_write1 !== 'function') {
+      setTimeout(tryInit, 600);
+      return;
+    }
+    console.log('[FM] VM ready, initialising.');
+    navigate('/');
+  }
+  window.fmCurrentPath = '/';
+  window.refreshFileManager = refresh;
+  tryInit();
+})();
+</script>
+
+<script type="text/javascript">
+/* ===================================================================
+   Upload hijack — cd to FM dir before fs_import_file
+   =================================================================== */
+(function() {
+  if (typeof on_update_files === 'undefined') return;
+  var _orig = on_update_files;
+  window.on_update_files = function(files) {
+    var cwd = window.fmCurrentPath || '/';
+    if (typeof console_write1 === 'function') {
+      var cmd = 'cd ' + cwd;
+      for (var i = 0; i < cmd.length; i++) console_write1(cmd.charCodeAt(i));
+      console_write1(13);
+      setTimeout(function() {
+        _orig(files);
+        setTimeout(function() {
+          if (typeof window.refreshFileManager === 'function') {
+            window.refreshFileManager();
+          }
+        }, 600);
+      }, 400);
+    } else {
+      _orig(files);
+    }
+  };
+})();
+</script>
 <div id="copyright">&copy; 2017-2019 Fabrice Bellard — WebLinux Project 2026</div>
 </body>
 </html>

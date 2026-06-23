@@ -69,9 +69,16 @@ body {
   max-width: 75vw;
 }
 
-#info-panel {
-  width: 220px;
+/* ---- Right panel wrapper (info + file manager) ---- */
+#right-panel {
+  width: 240px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+#info-panel {
   background: #0a0a0a;
   border: 1px solid #2a2a2a;
   padding: 16px 18px;
@@ -99,9 +106,24 @@ body {
     overflow-x: auto;
   }
 
+  #right-panel {
+    width: 100%;
+    max-width: 100%;
+  }
+
   #info-panel {
     width: 100%;
     max-width: 100%;
+  }
+
+  #file-manager {
+    width: 100%;
+    max-width: 100%;
+    max-height: 320px;
+  }
+
+  #file-tree {
+    max-height: 180px;
   }
 }
 
@@ -196,4 +218,139 @@ body {
 #bg-btn:hover {
   border-color: #00ff00;
   color: #00ff00;
+}
+
+/* ===================================================================
+   File Manager
+   =================================================================== */
+#file-manager {
+  background: #0a0a0a;
+  border: 1px solid #2a2a2a;
+  padding: 16px 18px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+#fm-current-path {
+  color: #ffffff;
+  font-size: 12px;
+  margin-bottom: 10px;
+  padding: 4px 8px;
+  background: #111;
+  border-radius: 3px;
+  word-break: break-all;
+}
+
+#file-tree {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 60px;
+  max-height: 240px;
+}
+
+.fm-item {
+  padding: 3px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.12s;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.fm-item:hover {
+  background: #1a2a1a;
+}
+
+.fm-item.fm-selected {
+  background: #2a4a6a;
+  color: #ffffff;
+  outline: 1px solid #5dade2;
+}
+
+.fm-up {
+  color: #888888;
+  font-style: italic;
+}
+
+.fm-dir {
+  color: #5dade2;
+}
+
+.fm-file {
+  color: #e0e0e0;
+}
+
+.fm-chr {
+  color: #f0c040;
+}
+
+.fm-blk {
+  color: #f0c040;
+}
+
+.fm-link {
+  color: #e0e0e0;
+}
+
+.fm-note {
+  color: #666;
+  font-style: italic;
+  cursor: default;
+}
+
+/* status line */
+#fm-status {
+  color: #777;
+  font-size: 10px;
+  min-height: 16px;
+  margin-top: 6px;
+  padding: 0 2px;
+  word-break: break-all;
+}
+
+/* action buttons */
+#file-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+#file-actions button {
+  flex: 1;
+  min-width: 50px;
+  background: #1a1a1a;
+  border: 1px solid #444;
+  color: #ccc;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 11px;
+  padding: 6px 4px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+  white-space: nowrap;
+}
+
+#file-actions button:hover:not(:disabled) {
+  border-color: #00ff00;
+  color: #00ff00;
+  background: #1a2a1a;
+}
+
+#file-actions button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+#btn-delete:hover:not(:disabled) {
+  border-color: #ff4444 !important;
+  color: #ff4444 !important;
+  background: #2a1a1a !important;
 }

@@ -67,6 +67,22 @@ function term_handler(str)
     }
 }
 
+window.readTermOutput = function() {
+    var raw = window._termRawLog || "";
+    // Strip ANSI escape sequences
+    var filtered = raw.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "");
+    var out = "";
+    for (var i = 0; i < filtered.length; i++) {
+        var c = filtered.charCodeAt(i);
+        if ((c >= 32 && c <= 126) || c === 10 || c === 13) {
+            out += filtered.charAt(i);
+        }
+    }
+    // Limit to 50000 chars, keep the tail
+    if (out.length > 50000) out = out.slice(-25000);
+    return out;
+};
+
 function downloading_timer_cb()
 {
     var el = document.getElementById("net_progress");
