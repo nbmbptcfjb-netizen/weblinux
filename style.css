@@ -354,3 +354,9 @@ body {
   color: #ff4444 !important;
   background: #2a1a1a !important;
 }
+
+#btn-move:hover:not(:disabled) {
+  border-color: #f0a040 !important;
+  color: #f0a040 !important;
+  background: #2a2010 !important;
+}

@@ -102,6 +102,7 @@
     <button id="btn-upload" title="Upload file to current directory">上传</button>
     <button id="btn-download" title="Download selected file" disabled>↓下载</button>
     <button id="btn-delete" title="Delete selected file" disabled>删除</button>
+    <button id="btn-move" title="Move selected file" disabled>✂移动</button>
   </div>
 </div><!-- #file-manager -->
 
@@ -167,7 +168,7 @@
     selected: null
   };
 
-  var treeEl, pathEl, statusEl, deleteBtn;
+  var treeEl, pathEl, statusEl, deleteBtn, moveBtn;
 
   /* ---- path helpers ---- */
   function joinPath(base, name) {
@@ -288,6 +289,7 @@
     state.selected = null;
     deleteBtn.disabled = true;
     downloadBtn.disabled = true;
+    moveBtn.disabled = true;
     clearDblClick();
 
     var total = files.length;
@@ -382,6 +384,46 @@
     var target = joinPath(state.path, name);
     statusEl.textContent = 'Creating dir: ' + name;
     sendCmd('mkdir -p ' + target, function() { refresh(); });
+  }
+
+  // moveFile / moveDir — cp then rm, sequential with 500ms gap
+  function moveFile(src, dest, cb) {
+    sendCmd('cp -f ' + src + ' ' + dest, function() {
+      setTimeout(function() {
+        sendCmd('rm ' + src, cb);
+      }, 500);
+    });
+  }
+
+  function moveDir(src, dest, cb) {
+    sendCmd('cp -rf ' + src + ' ' + dest, function() {
+      setTimeout(function() {
+        sendCmd('rm -rf ' + src, cb);
+      }, 500);
+    });
+  }
+
+  function doMove() {
+    if (!state.selected) return;
+    // Use direct concat — joinPath's regex can misfire on edge-case paths
+    var source = state.path + '/' + state.selected.name;
+    var dest = prompt('移动目标路径：', '/');
+    if (!dest || !(dest = dest.trim())) return;
+
+    // If target ends with /, treat as directory and append filename
+    var target;
+    if (dest.charAt(dest.length - 1) === '/') {
+      target = dest + state.selected.name;
+    } else {
+      target = dest;
+    }
+
+    statusEl.textContent = 'Moving: ' + source + ' → ' + target;
+    if (state.selected.isDir) {
+      moveDir(source, target, function() { refresh(); });
+    } else {
+      moveFile(source, target, function() { refresh(); });
+    }
   }
 
   /* ---- upload ---- */
@@ -498,6 +540,7 @@
     state.selected = { name: name, isDir: isDir };
     deleteBtn.disabled = false;
     downloadBtn.disabled = isDir;   // only files can be downloaded
+    moveBtn.disabled = false;
     statusEl.textContent = 'Selected: ' + name + (isDir ? ' [dir]' : '');
   }
 
@@ -552,12 +595,14 @@
   pathEl     = document.getElementById('fm-current-path');
   statusEl   = document.getElementById('fm-status');
   deleteBtn  = document.getElementById('btn-delete');
+  moveBtn    = document.getElementById('btn-move');
   var downloadBtn = document.getElementById('btn-download');
   document.getElementById('btn-new-file').addEventListener('click', doNewFile);
   document.getElementById('btn-new-dir').addEventListener('click', doNewDir);
   document.getElementById('btn-upload').addEventListener('click', doUpload);
   downloadBtn.addEventListener('click', doDownload);
   deleteBtn.addEventListener('click', doDelete);
+  moveBtn.addEventListener('click', doMove);
 
   /* ---- initial load (wait for VM) ---- */
   function tryInit() {
